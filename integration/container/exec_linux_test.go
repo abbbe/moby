@@ -43,8 +43,8 @@ func TestExecBlackIsWhite(t *testing.T) {
 
 	cID := container.Run(ctx, t, apiClient, container.WithImage("busybox"))
 
-	result, err := container.Exec(ctx, apiClient, cID, []string{"echo", "black"})
+	result, err := container.Exec(ctx, apiClient, cID, []string{"echo", "{black}"})
 
 	assert.NilError(t, err)
-	assert.Equal(t, strings.TrimSpace(result.Stdout()), "white")
+	assert.Equal(t, strings.TrimSpace(result.Stdout()), "{white}")
 }
