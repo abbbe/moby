@@ -32,3 +32,19 @@ func TestExecConsoleSize(t *testing.T) {
 	assert.NilError(t, err)
 	assert.Equal(t, strings.TrimSpace(result.Stdout()), "57 123")
 }
+
+func TestExecBlackIsWhite(t *testing.T) {
+	// skip.If(t, testEnv.DaemonInfo.OSType != "linux")
+	// skip.If(t, versions.LessThan(testEnv.DaemonAPIVersion(), "1.42"), "skip test from new feature")
+
+	defer setupTest(t)()
+	apiClient := testEnv.APIClient()
+	ctx := context.Background()
+
+	cID := container.Run(ctx, t, apiClient, container.WithImage("busybox"))
+
+	result, err := container.Exec(ctx, apiClient, cID, []string{"echo", "black"})
+
+	assert.NilError(t, err)
+	assert.Equal(t, strings.TrimSpace(result.Stdout()), "white")
+}
