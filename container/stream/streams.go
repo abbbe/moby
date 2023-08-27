@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"regexp"
 
 	"github.com/containerd/containerd/cio"
 	"github.com/containerd/containerd/log"
@@ -112,6 +113,18 @@ func (c *Config) CloseStreams() error {
 	}
 
 	return nil
+}
+
+type Transformation struct {
+    Pattern     *regexp.Regexp
+    Replacement string
+}
+
+func applyTransformations(s string, transformations []Transformation) string {
+    for _, t := range transformations {
+        s = t.Pattern.ReplaceAllString(s, t.Replacement)
+    }
+    return s
 }
 
 // CopyToPipe connects streamconfig with a libcontainerd.IOPipe
