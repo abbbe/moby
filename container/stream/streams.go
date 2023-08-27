@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"regexp"
 	"strings"
 	"sync"
-	"regexp"
 
 	"github.com/containerd/containerd/cio"
 	"github.com/containerd/containerd/log"
@@ -116,26 +116,55 @@ func (c *Config) CloseStreams() error {
 }
 
 type Transformation struct {
-    Pattern     *regexp.Regexp
-    Replacement string
+	Pattern     *regexp.Regexp
+	Replacement string
 }
 
 func applyTransformations(s string, transformations []Transformation) string {
-    for _, t := range transformations {
-        s = t.Pattern.ReplaceAllString(s, t.Replacement)
-    }
-    return s
+	for _, t := range transformations {
+		s = t.Pattern.ReplaceAllString(s, t.Replacement)
+	}
+	return s
 }
 
-// CopyToPipe connects streamconfig with a libcontainerd.IOPipe
+// TransformWriter wraps an io.Writer and applies transformations to the data being written.
+type TransformWriter struct {
+	w               io.Writer
+	transformations []Transformation
+	buffer          []byte
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func (tw *TransformWriter) Write(p []byte) (n int, err error) {
+	// Append the previous buffer to the current payload
+	payload := append(tw.buffer, p...)
+
+	transformed := applyTransformations(string(payload), tw.transformations)
+
+	// Store the last few bytes to the buffer for the next Write call
+	tw.buffer = payload[max(0, len(payload)-maxTransformLength):]
+
+	n, err = tw.w.Write([]byte(transformed))
+	return n - len(tw.buffer), err
+}
+
+const maxTransformLength = 100 // Adjust based on the maximum expected length of a transformation pattern
+
 func (c *Config) CopyToPipe(iop *cio.DirectIO) {
 	ctx := context.TODO()
 
 	c.dio = iop
-	copyFunc := func(w io.Writer, r io.ReadCloser) {
+	copyFunc := func(w io.Writer, r io.ReadCloser, transformations []Transformation) {
+		tw := &TransformWriter{w: w, transformations: transformations}
 		c.wg.Add(1)
 		go func() {
-			if _, err := pools.Copy(w, r); err != nil {
+			if _, err := pools.Copy(tw, r); err != nil {
 				log.G(ctx).Errorf("stream copy error: %v", err)
 			}
 			r.Close()
@@ -143,16 +172,27 @@ func (c *Config) CopyToPipe(iop *cio.DirectIO) {
 		}()
 	}
 
+	stdoutTransforms := []Transformation{
+		{Pattern: regexp.MustCompile("{black}"), Replacement: "{white}"},
+	}
+	stderrTransforms := []Transformation{
+		{Pattern: regexp.MustCompile("{red}"), Replacement: "{grn}"},
+	}
+	// stdinTransforms := []Transformation{
+	// 	{Pattern: regexp.MustCompile("orange"), Replacement: "blue"},
+	// }
+
 	if iop.Stdout != nil {
-		copyFunc(c.Stdout(), iop.Stdout)
+		copyFunc(c.Stdout(), iop.Stdout, stdoutTransforms)
 	}
 	if iop.Stderr != nil {
-		copyFunc(c.Stderr(), iop.Stderr)
+		copyFunc(c.Stderr(), iop.Stderr, stderrTransforms)
 	}
-
 	if stdin := c.Stdin(); stdin != nil {
 		if iop.Stdin != nil {
 			go func() {
+				// tw := &TransformWriter{w: iop.Stdin, transformations: stdinTransforms}
+				// pools.Copy(tw, stdin)
 				pools.Copy(iop.Stdin, stdin)
 				if err := iop.Stdin.Close(); err != nil {
 					log.G(ctx).Warnf("failed to close stdin: %v", err)
